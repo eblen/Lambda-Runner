@@ -1,38 +1,31 @@
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+
 template<typename L>
-class lambdaRunner {
-    lambdaRunner(L l) : finished(false), lambda(l) {
-        id_ = nextId_++;
+class LambdaRunner {
+    LambdaRunner<L>(L l) : finished_(false), lambda_(l), isRunning_(true) {
         thread_.reset(new std::thread([&](){
-            myId_ = gid_;
+            myRunner_ = this;
             pause();
             lambda_();
         }
         finished_ = true;
     }
-    // Get Id of this runner
-    int getGid() {
-        return id_;
-    }
-    // Get Id from inside thread
-    // Note: Undefined if called outside thread
-    static int getMyId() {
-        return myId_;
-    }
+    void pause();
+    void run();
+    void wait();
+    bool isFinished() {return finished_;}
+
+    // Enclosing instance from inside thread or nullptr otherwise
+    static thread_local LambdaRunner<L>* instance;
 private:
-    // Id needs to be accessible both outside and inside the thread
-    // Should always have gid_ == lid_
-    int id_;
-    static thread_local int myId_;
     bool finished_;
     std::thread thread_;
     L lambda_;
-    static std::atomic<int> nextId_ = 0;
+
+    // Synchronization Primitives
+    bool isRunning_;
+    std::condition_variable cv_;
+    std::mutex mut_;
 };
-
-void pause() {
-    // Wait on condition variable
-}
-
-void run() {
-    // Should wakeup and resume
-}
