@@ -10,6 +10,8 @@
 #define thread_local __declspec(thread)
 #endif
 
+void setAffinity(int core);
+
 // This umbrella class exists to allow referencing a LambdaRunner without
 // knowing the type of the lambda (essential for pausing from inside a lambda).
 class LambdaRunner {
@@ -59,10 +61,13 @@ public:
 
 private:
     // Create runners with "createLambdaRunner" friend function
-    LambdaRunnerImpl<L, Args...>(L l, Args... args) : finished_(false), lambda_(l),
-    isRunning_(true) {
-        thread_.reset(new std::thread([this,args...](){
+    LambdaRunnerImpl<L, Args...>(int core, L l, Args... args) : finished_(false),
+    lambda_(l), isRunning_(true) {
+        thread_.reset(new std::thread([core,this,args...](){
             instance = this;
+            if (core >= 0) {
+                setAffinity(core);
+            }
             pause();
             lambda_(args...);
             finished_ = true;
@@ -74,7 +79,7 @@ private:
         wait();
     }
     template<typename L, typename... Args>
-    friend LambdaRunnerImpl<L, Args...>* createLambdaRunner(L l, Args... args);
+    friend LambdaRunnerImpl<L, Args...>* createPinnedLambdaRunner(int core, L l, Args... args);
 
     bool finished_;
     std::unique_ptr<std::thread> thread_;
@@ -87,6 +92,11 @@ private:
 };
 
 template<typename L, typename... Args>
+LambdaRunnerImpl<L, Args...>* createPinnedLambdaRunner(int core, L l, Args... args) {
+    return new LambdaRunnerImpl<L, Args...>(core, l, args...);
+}
+
+template<typename L, typename... Args>
 LambdaRunnerImpl<L, Args...>* createLambdaRunner(L l, Args... args) {
-    return new LambdaRunnerImpl<L, Args...>(l, args...);
+    return createPinnedLambdaRunner(-1, l, args...);
 }

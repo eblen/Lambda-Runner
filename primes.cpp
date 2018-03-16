@@ -23,7 +23,7 @@ int main(int argc, char **argv)
     if (argc > 1) {
         max = atoi(argv[1]);
     }
-    auto lr = createLambdaRunner([](int max){
+    auto lr = createPinnedLambdaRunner(0, [](int max){
         primePrinter(max);
     }, max);
     int i=1;
