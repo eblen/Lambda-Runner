@@ -1,9 +1,8 @@
 #include <stdio.h>
 #include "lambdaRunner.h"
 
-const int MAX_NUM = 100;
-void primePrinter() {
-    for (int i=2; i<=MAX_NUM; i++) {
+void primePrinter(int max) {
+    for (int i=2; i<=max; i++) {
         bool isPrime = true;
         for (int j=2; j<=i/2; j++) {
             if (i % j == 0) {
@@ -18,11 +17,15 @@ void primePrinter() {
     }
 }
 
-int main()
+int main(int argc, char **argv)
 {
-    auto lr = createLambdaRunner([]{
-        primePrinter();
-    });
+    int max = 100;
+    if (argc > 1) {
+        max = atoi(argv[1]);
+    }
+    auto lr = createLambdaRunner([](int max){
+        primePrinter(max);
+    }, max);
     int i=1;
     while (true) {
         lr->run();

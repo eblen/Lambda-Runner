@@ -22,7 +22,7 @@ public:
     static thread_local LambdaRunner* instance;
 };
 
-template<typename L>
+template<typename L, typename... Args>
 class LambdaRunnerImpl : LambdaRunner {
 public:
     // Called inside lambda to pause execution
@@ -59,11 +59,12 @@ public:
 
 private:
     // Create runners with "createLambdaRunner" friend function
-    LambdaRunnerImpl<L>(L l) : finished_(false), lambda_(l), isRunning_(true) {
-        thread_.reset(new std::thread([&](){
+    LambdaRunnerImpl<L, Args...>(L l, Args... args) : finished_(false), lambda_(l),
+    isRunning_(true) {
+        thread_.reset(new std::thread([this,args...](){
             instance = this;
             pause();
-            lambda_();
+            lambda_(args...);
             finished_ = true;
             while(true) {
                 pause();
@@ -72,8 +73,8 @@ private:
         // Calling thread waits for first pause, when runner is fully initialized.
         wait();
     }
-    template<typename F>
-    friend LambdaRunnerImpl<F>* createLambdaRunner(F f);
+    template<typename L, typename... Args>
+    friend LambdaRunnerImpl<L, Args...>* createLambdaRunner(L l, Args... args);
 
     bool finished_;
     std::unique_ptr<std::thread> thread_;
@@ -85,7 +86,7 @@ private:
     std::mutex mut_;
 };
 
-template<typename F>
-LambdaRunnerImpl<F>* createLambdaRunner(F f) {
-    return new LambdaRunnerImpl<F>(f);
+template<typename L, typename... Args>
+LambdaRunnerImpl<L, Args...>* createLambdaRunner(L l, Args... args) {
+    return new LambdaRunnerImpl<L, Args...>(l, args...);
 }
