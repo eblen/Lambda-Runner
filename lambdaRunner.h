@@ -1,4 +1,5 @@
 #include <cassert>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -20,20 +21,22 @@ public:
     virtual void run() = 0;
     virtual void wait() = 0;
     virtual bool isFinished() = 0;
+    virtual ~LambdaRunner() {};
     // NULL if accessed outside a lambda
     static thread_local LambdaRunner* instance;
 };
 
 template<typename L, typename... Args>
-class LambdaRunnerImpl : LambdaRunner {
+class LambdaRunnerImpl : public LambdaRunner {
 public:
-    // Called inside lambda to pause execution
+    // Called inside lambda to pause execution or halt on completion.
     // It is an error to call outside of lambda
     void pause() override {
         assert(instance != nullptr);
         std::unique_lock<std::mutex> lk(mut_);
         isRunning_ = false;
         cv_.notify_all();
+        if (finished_) return;
         while (!isRunning_) {
             cv_.wait(lk);
         }
@@ -42,6 +45,7 @@ public:
     // Called outside of lambda to resume execution
     // Does nothing if called inside lambda
     void run() override {
+        if (finished_) return;
         std::unique_lock<std::mutex> lk(mut_);
         isRunning_ = true;
         lk.unlock();
@@ -51,6 +55,7 @@ public:
     // Called outside of lambda to wait for lambda to pause
     // Does nothing if called inside lambda
     void wait() override {
+        if (finished_) return;
         std::unique_lock<std::mutex> lk(mut_);
         while (isRunning_) {
             cv_.wait(lk);
@@ -71,17 +76,19 @@ private:
             pause();
             lambda_(args...);
             finished_ = true;
-            while(true) {
-                pause();
-            }
+            pause();
         }));
         // Calling thread waits for first pause, when runner is fully initialized.
         wait();
     }
+    ~LambdaRunnerImpl() {
+        assert(finished_);
+        thread_->join();
+    }
     template<typename L, typename... Args>
     friend LambdaRunnerImpl<L, Args...>* createPinnedLambdaRunner(int core, L l, Args... args);
 
-    bool finished_;
+    std::atomic<bool> finished_;
     std::unique_ptr<std::thread> thread_;
     L lambda_;
 
