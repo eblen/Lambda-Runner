@@ -23,19 +23,18 @@ int main(int argc, char **argv)
     if (argc > 1) {
         max = atoi(argv[1]);
     }
-    auto lr = createPinnedLambdaRunner(0, [](int max){
-        primePrinter(max);
-    }, max);
+    LambdaRunner lr(0);
+    lr.run([=]{primePrinter(max);});
     int i=1;
     while (true) {
-        lr->run();
-        lr->wait();
-        if (lr->isFinished()) {
+        lr.wait();
+        if (lr.isFinished()) {
             break;
         }
         else {
             printf("is prime %d\n", i++);
         }
+        lr.cont();
     }
     return 0;
 }

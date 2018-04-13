@@ -1,6 +1,7 @@
 #include <cassert>
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -13,30 +14,52 @@
 
 void setAffinity(int core);
 
-// This umbrella class exists to allow referencing a LambdaRunner without
-// knowing the type of the lambda (essential for pausing from inside a lambda).
 class LambdaRunner {
 public:
-    virtual void pause() = 0;
-    virtual void run() = 0;
-    virtual void wait() = 0;
-    virtual bool isFinished() = 0;
-    virtual ~LambdaRunner() {};
-    // NULL if accessed outside a lambda
-    static thread_local LambdaRunner* instance;
-};
+    LambdaRunner(int core=-1) : finished_(true), doHalt_(false), isRunning_(true) {
+        thread_.reset(new std::thread([core,this](){
+            instance = this;
+            if (core >= 0) {
+                setAffinity(core);
+            }
+            while (!doHalt_) {
+                pause();
+                // Checking finished_ ensures that each lambda is run only once.
+                // This could happen if cont() is called after finishing
+                if (!finished_) {
+                    lambda_();
+                }
+                finished_ = true;
+            }
+        }));
+        // Calling thread waits for pause, when runner is fully initialized.
+        wait();
+    }
 
-template<typename L, typename... Args>
-class LambdaRunnerImpl : public LambdaRunner {
-public:
+    ~LambdaRunner() {
+        assert(finished_);
+        doHalt_ = true;
+        // TODO: Race condition: cont could be called before thread pauses.
+        cont();
+        thread_->join();
+    }
+
+    // Called outside of lambda to start running a new lambda.
+    // It is an error to call if current lambda is not finished.
+    void run(std::function<void()> lambda) {
+        assert(finished_);
+        lambda_ = lambda;
+        finished_ = false;
+        // TODO: Race condition: cont could be called before thread pauses.
+        cont();
+    }
     // Called inside lambda to pause execution or halt on completion.
     // It is an error to call outside of lambda
-    void pause() override {
+    void pause() {
         assert(instance != nullptr);
         std::unique_lock<std::mutex> lk(mut_);
         isRunning_ = false;
         cv_.notify_all();
-        if (finished_) return;
         while (!isRunning_) {
             cv_.wait(lk);
         }
@@ -44,8 +67,7 @@ public:
 
     // Called outside of lambda to resume execution
     // Does nothing if called inside lambda
-    void run() override {
-        if (finished_) return;
+    void cont() {
         std::unique_lock<std::mutex> lk(mut_);
         isRunning_ = true;
         lk.unlock();
@@ -54,56 +76,27 @@ public:
 
     // Called outside of lambda to wait for lambda to pause
     // Does nothing if called inside lambda
-    void wait() override {
-        if (finished_) return;
+    void wait() {
         std::unique_lock<std::mutex> lk(mut_);
         while (isRunning_) {
             cv_.wait(lk);
         }
     }
 
-    bool isFinished() override {return finished_;}
+    bool isFinished() {return finished_;}
+
+    // Instance for current thread or nullptr if thread was not launched
+    // by a runner.
+    static thread_local LambdaRunner* instance;
 
 private:
-    // Create runners with "createLambdaRunner" friend function
-    LambdaRunnerImpl<L, Args...>(int core, L l, Args... args) : finished_(false),
-    lambda_(l), isRunning_(true) {
-        thread_.reset(new std::thread([core,this,args...](){
-            instance = this;
-            if (core >= 0) {
-                setAffinity(core);
-            }
-            pause();
-            lambda_(args...);
-            finished_ = true;
-            pause();
-        }));
-        // Calling thread waits for first pause, when runner is fully initialized.
-        wait();
-    }
-    ~LambdaRunnerImpl() {
-        assert(finished_);
-        thread_->join();
-    }
-    template<typename L, typename... Args>
-    friend LambdaRunnerImpl<L, Args...>* createPinnedLambdaRunner(int core, L l, Args... args);
-
     std::atomic<bool> finished_;
+    std::atomic<bool> doHalt_;
     std::unique_ptr<std::thread> thread_;
-    L lambda_;
+    std::function<void()> lambda_;
 
     // Synchronization Primitives
     bool isRunning_;
     std::condition_variable cv_;
     std::mutex mut_;
 };
-
-template<typename L, typename... Args>
-LambdaRunnerImpl<L, Args...>* createPinnedLambdaRunner(int core, L l, Args... args) {
-    return new LambdaRunnerImpl<L, Args...>(core, l, args...);
-}
-
-template<typename L, typename... Args>
-LambdaRunnerImpl<L, Args...>* createLambdaRunner(L l, Args... args) {
-    return createPinnedLambdaRunner(-1, l, args...);
-}
