@@ -25,7 +25,6 @@ public:
         assert(core >= 0);
         lrs[core].emplace_back(std::move(lr));
     }
-
     std::map<int,size_t> getStats() {
         std::lock_guard<std::mutex> lock(poolMut);
         std::map<int,size_t> m;
@@ -34,6 +33,11 @@ public:
         }
         return m;
     }
+
+    // A global pool, so that users don't have to create and somehow store a
+    // pool if the application only needs one.
+    static LRPool gpool;
+
 private:
     std::map<int,std::vector<std::unique_ptr<LambdaRunner>>> lrs;
     std::mutex poolMut;

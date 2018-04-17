@@ -7,14 +7,12 @@
 // Program to test the LambdaRunner Pool
 // Multiple threads
 
-static LRPool pool;
-
 void printstuff(int t, int n, int c) {
     static std::mutex mut;
     std::lock_guard<std::mutex> lock(mut);
     printf("Thread %d lr %d core %d\n", t, n, c);
     size_t num_lrs = 0;
-    for (auto s : pool.getStats()) {
+    for (auto s : LRPool::gpool.getStats()) {
         printf("%d %d\n", s.first, s.second);
         num_lrs += s.second;
     }
@@ -39,11 +37,11 @@ int main()
             for (int j=0; j<iter_per_thread; j++)
             {
                 int core = rand() % ncores;
-                auto lr = pool.get(core);
+                auto lr = LRPool::gpool.get(core);
                 if (rand() % 100  < delay_prob * 100) {
                     lr->run([=](){printstuff(i,j,core);});
                     lr->wait();
-                    pool.release(lr);
+                    LRPool::gpool.release(lr);
                 }
                 else {
                     lrs[j] = std::move(lr);
@@ -56,7 +54,7 @@ int main()
                     int core = lrs[j]->getCore();
                     lrs[j]->run([=](){printstuff(i,j,core);});
                     lrs[j]->wait();
-                    pool.release(lrs[j]);
+                    LRPool::gpool.release(lrs[j]);
                 }
             }
         });
